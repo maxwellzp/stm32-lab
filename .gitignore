@@ -11,3 +11,8 @@ Release/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Eclipse / STM32CubeIDE workspace metadata
+.metadata/
+.project
+
