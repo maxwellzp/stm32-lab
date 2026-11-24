@@ -51,19 +51,27 @@ DMA_HandleTypeDef hdma_usart2_rx;
 
 /* USER CODE BEGIN PV */
 
-// char tx_buffer[64];
-// uint8_t rx_buffer[5];
-// uint8_t tx_buffer[5];
+/* USER CODE BEGIN PV */
+
 uint8_t rx_buffer[64];
 uint8_t tx_buffer[64];
 
-// uint32_t counter = 0;
+uint8_t command_buffer[64];
 
-volatile uint8_t rx_complete = 0;
-// volatile uint8_t tx_complete = 0;
-volatile uint16_t rx_length = 0;
+volatile uint16_t command_index = 0;
+volatile uint8_t command_ready = 0;
+volatile uint8_t command_overflow = 0;
 
 volatile uint8_t uart_tx_busy = 0;
+
+// 0 - LED OFF
+// 1 - LED ON
+// 2 - LED BLINK
+volatile uint8_t led_mode = 0;
+
+uint32_t last_led_update = 0;
+
+/* USER CODE END PV */
 
 /* USER CODE END PV */
 
@@ -73,6 +81,8 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
+
+void Process_Command(void);
 
 /* USER CODE END PFP */
 
@@ -113,13 +123,14 @@ int main(void) {
 	MX_USART2_UART_Init();
 	/* USER CODE BEGIN 2 */
 
+	/* Initialize leds */
+	BSP_LED_Init(LED2);
+
 	// HAL_UART_Receive_DMA(&huart2, rx_buffer, sizeof(rx_buffer));
 	HAL_UARTEx_ReceiveToIdle_DMA(&huart2, rx_buffer, sizeof(rx_buffer));
 
 	/* USER CODE END 2 */
 
-	/* Initialize leds */
-	BSP_LED_Init(LED2);
 
 	/* Initialize USER push-button, will be used to trigger an interrupt each time it's pressed.*/
 	BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
@@ -131,74 +142,63 @@ int main(void) {
 
 		/* USER CODE BEGIN 3 */
 
-//		static uint32_t last_update = 0;
-//
-//		if (HAL_GetTick() - last_update >= 1000) {
-//			last_update = HAL_GetTick();
-//
-//			if (uart_tx_busy == 0) {
-//				int length = snprintf(tx_buffer, sizeof(tx_buffer),
-//						"DMA Counter: %lu\r\n", counter);
-//
-//				if (length > 0 && length < sizeof(tx_buffer)) {
-//					if (HAL_UART_Transmit_DMA(&huart2, (uint8_t*) tx_buffer,
-//							length) == HAL_OK) {
-//						uart_tx_busy = 1;
-//						counter++;
-//					}
-//				}
-//			}
-//		}
-//		if (rx_complete == 1)
-//		{
-//		    rx_complete = 0;
-//
-//		    if (uart_tx_busy == 0)
-//		    {
-//		        if (HAL_UART_Transmit_DMA(&huart2, rx_buffer, sizeof(rx_buffer)) == HAL_OK)
-//		        {
-//		            uart_tx_busy = 1;
-//		        }
-//		    }
-//
-//		    HAL_UART_Receive_DMA(&huart2, rx_buffer, sizeof(rx_buffer));
-//		}
-
-//		if (rx_complete == 1) {
-//			rx_complete = 0;
-//
-//			memcpy(tx_buffer, rx_buffer, sizeof(rx_buffer));
-//
-//			if (HAL_UART_Transmit_DMA(&huart2, tx_buffer, sizeof(tx_buffer))
-//					== HAL_OK) {
-//				tx_complete = 0;
-//			}
-//		}
-//
-//		if (tx_complete == 1) {
-//			tx_complete = 0;
-//
-//			HAL_UART_Receive_DMA(&huart2, rx_buffer, sizeof(rx_buffer));
-//		}
-
-		if (rx_complete == 1)
+		if (command_ready == 1 && uart_tx_busy == 0)
 		{
-		    rx_complete = 0;
+		    command_ready = 0;
 
-		    memcpy(tx_buffer, rx_buffer, rx_length);
+		    Process_Command();
 
-		    if (uart_tx_busy == 0)
+		    command_index = 0;
+		    command_overflow = 0;
+
+		    HAL_UARTEx_ReceiveToIdle_DMA(
+		        &huart2,
+		        rx_buffer,
+		        sizeof(rx_buffer)
+		    );
+
+		    __HAL_DMA_DISABLE_IT(huart2.hdmarx, DMA_IT_HT);
+
+		    uart_tx_busy = 1;
+
+		    if (HAL_UART_Transmit_DMA(
+		            &huart2,
+		            tx_buffer,
+		            strlen((char *)tx_buffer)) != HAL_OK)
 		    {
-		        if (HAL_UART_Transmit_DMA(&huart2, tx_buffer, rx_length) == HAL_OK)
-		        {
-		            uart_tx_busy = 1;
-		        }
+		        uart_tx_busy = 0;
 		    }
+		}
 
-		    HAL_UARTEx_ReceiveToIdle_DMA(&huart2, rx_buffer, sizeof(rx_buffer));
+		if (led_mode == 2)
+		{
+		    if (HAL_GetTick() - last_led_update >= 500)
+		    {
+		        last_led_update = HAL_GetTick();
+		        BSP_LED_Toggle(LED2);
+		    }
 		}
 
 	}
+
+//	Welcome to minicom 2.9
+//
+//	OPTIONS: I18n
+//	Port /dev/ttyACM0, 14:48:08
+//
+//	Press CTRL-A Z for help on special keys
+//
+//	LED is ON
+//	LED is OFF
+//	LED is BLINKING
+//	Unknown command
+//	LED is OFF
+//	LED is ON
+//	Unknown command
+//	LED is BLINKING
+
+
+
 	/* USER CODE END 3 */
 }
 
@@ -321,23 +321,112 @@ static void MX_GPIO_Init(void) {
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
 
 	if (huart->Instance == USART2) {
-		// tx_complete = 1;
 		uart_tx_busy = 0;
 	}
 }
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-	if (huart->Instance == USART2) {
-		rx_complete = 1;
-	}
+
+void HAL_UARTEx_RxEventCallback(
+        UART_HandleTypeDef *huart,
+        uint16_t Size)
+{
+    if (huart->Instance == USART2)
+    {
+        for (uint16_t i = 0; i < Size; i++)
+        {
+            uint8_t received_char = rx_buffer[i];
+
+            if (received_char == '\r' || received_char == '\n')
+            {
+                if (command_index > 0 && command_ready == 0)
+                {
+                    command_buffer[command_index] = '\0';
+                    command_ready = 1;
+                }
+            }
+            else
+            {
+                if (command_ready == 0 && command_overflow == 0)
+                {
+                    if (command_index < sizeof(command_buffer) - 1)
+                    {
+                        command_buffer[command_index] = received_char;
+                        command_index++;
+                    }
+                    else
+                    {
+                        command_overflow = 1;
+                    }
+                }
+            }
+        }
+
+        if (command_ready == 0)
+        {
+            HAL_UARTEx_ReceiveToIdle_DMA(
+                &huart2,
+                rx_buffer,
+                sizeof(rx_buffer)
+            );
+
+            __HAL_DMA_DISABLE_IT(huart2.hdmarx, DMA_IT_HT);
+        }
+    }
 }
 
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
-	if (huart->Instance == USART2) {
-		rx_length = Size;
-		rx_complete = 1;
-	}
+void Process_Command(void)
+{
+    if (command_overflow == 1)
+    {
+        strcpy((char *)tx_buffer, "Command too long\r\n");
+        return;
+    }
+
+    if (strcmp((char *)command_buffer, "LED ON") == 0)
+    {
+        led_mode = 1;
+
+        BSP_LED_On(LED2);
+
+        strcpy((char *)tx_buffer, "LED is ON\r\n");
+    }
+    else if (strcmp((char *)command_buffer, "LED OFF") == 0)
+    {
+        led_mode = 0;
+
+        BSP_LED_Off(LED2);
+
+        strcpy((char *)tx_buffer, "LED is OFF\r\n");
+    }
+    else if (strcmp((char *)command_buffer, "LED BLINK") == 0)
+    {
+        led_mode = 2;
+
+        last_led_update = HAL_GetTick();
+
+        strcpy((char *)tx_buffer, "LED is BLINKING\r\n");
+    }
+    else if (strcmp((char *)command_buffer, "STATUS") == 0)
+    {
+        if (led_mode == 0)
+        {
+            strcpy((char *)tx_buffer, "LED status: OFF\r\n");
+        }
+        else if (led_mode == 1)
+        {
+            strcpy((char *)tx_buffer, "LED status: ON\r\n");
+        }
+        else
+        {
+            strcpy((char *)tx_buffer, "LED status: BLINKING\r\n");
+        }
+    }
+    else
+    {
+        strcpy((char *)tx_buffer, "Unknown command\r\n");
+    }
 }
+
 
 /* USER CODE END 4 */
 
