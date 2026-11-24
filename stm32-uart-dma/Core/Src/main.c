@@ -51,10 +51,16 @@ DMA_HandleTypeDef hdma_usart2_rx;
 
 /* USER CODE BEGIN PV */
 
-char tx_buffer[64];
-uint8_t rx_buffer[5];
+// char tx_buffer[64];
 
-uint32_t counter = 0;
+uint8_t rx_buffer[5];
+uint8_t tx_buffer[5];
+
+// uint32_t counter = 0;
+
+volatile uint8_t rx_complete = 0;
+volatile uint8_t tx_complete = 0;
+
 
 volatile uint8_t uart_tx_busy = 0;
 
@@ -124,24 +130,58 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-		static uint32_t last_update = 0;
+//		static uint32_t last_update = 0;
+//
+//		if (HAL_GetTick() - last_update >= 1000) {
+//			last_update = HAL_GetTick();
+//
+//			if (uart_tx_busy == 0) {
+//				int length = snprintf(tx_buffer, sizeof(tx_buffer),
+//						"DMA Counter: %lu\r\n", counter);
+//
+//				if (length > 0 && length < sizeof(tx_buffer)) {
+//					if (HAL_UART_Transmit_DMA(&huart2, (uint8_t*) tx_buffer,
+//							length) == HAL_OK) {
+//						uart_tx_busy = 1;
+//						counter++;
+//					}
+//				}
+//			}
+//		}
 
-		if (HAL_GetTick() - last_update >= 1000) {
-			last_update = HAL_GetTick();
+//		if (rx_complete == 1)
+//		{
+//		    rx_complete = 0;
+//
+//		    if (uart_tx_busy == 0)
+//		    {
+//		        if (HAL_UART_Transmit_DMA(&huart2, rx_buffer, sizeof(rx_buffer)) == HAL_OK)
+//		        {
+//		            uart_tx_busy = 1;
+//		        }
+//		    }
+//
+//		    HAL_UART_Receive_DMA(&huart2, rx_buffer, sizeof(rx_buffer));
+//		}
 
-			if (uart_tx_busy == 0) {
-				int length = snprintf(tx_buffer, sizeof(tx_buffer),
-						"DMA Counter: %lu\r\n", counter);
+		if (rx_complete == 1)
+		    {
+		        rx_complete = 0;
 
-				if (length > 0 && length < sizeof(tx_buffer)) {
-					if (HAL_UART_Transmit_DMA(&huart2, (uint8_t*) tx_buffer,
-							length) == HAL_OK) {
-						uart_tx_busy = 1;
-						counter++;
-					}
-				}
-			}
-		}
+		        memcpy(tx_buffer, rx_buffer, sizeof(rx_buffer));
+
+		        if (HAL_UART_Transmit_DMA(&huart2, tx_buffer, sizeof(tx_buffer)) == HAL_OK)
+		        {
+		            tx_complete = 0;
+		        }
+		    }
+
+		    if (tx_complete == 1)
+		    {
+		        tx_complete = 0;
+
+		        HAL_UART_Receive_DMA(&huart2, rx_buffer, sizeof(rx_buffer));
+		    }
 
 
 	}
@@ -274,8 +314,7 @@ static void MX_GPIO_Init(void)
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
 
 	if (huart->Instance == USART2) {
-		uart_tx_busy = 0;
-		// BSP_LED_Toggle(LED2);
+		tx_complete = 1;
 	}
 }
 
@@ -283,7 +322,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART2)
     {
-        HAL_UART_Transmit_DMA(&huart2, rx_buffer, sizeof(rx_buffer));
+    	rx_complete = 1;
     }
 }
 
